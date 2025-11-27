@@ -21,4 +21,4 @@ It is designed for students and researchers to understand the physical layer (PH
 
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/your-username/OFDM-SDR-System.git](https://github.com/your-username/OFDM-SDR-System.git)
+   git clone https://github.com/ctegdf/OFDM_SDR_System.git
