@@ -1,5 +1,8 @@
 import numpy as np
 from scipy.interpolate import interp1d
+import torch
+import torch.nn as nn
+import os
 
 class OFDM_System:
     def __init__(self, K=64, CP=16, P=8):
@@ -50,3 +53,59 @@ class OFDM_System:
         for i in range(nb):
             He[:, i] = interp1d(self.pilotCarriers, H[:, i], kind='linear', fill_value="extrapolate")(self.allCarriers)
         return self._qpsk_demap((rxf / He)[self.dataCarriers, :].flatten(order='F'))
+
+class DNN_Channel_Estimator(nn.Module):
+    def __init__(self):
+        super(DNN_Channel_Estimator, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(16, 64), nn.ReLU(),
+            nn.Linear(64, 256), nn.ReLU(),
+            nn.Linear(256, 128)
+        )
+
+    def forward(self, x): return self.layers(x)
+
+
+class AI_OFDM_System(OFDM_System):
+    def __init__(self, model_path, K=64, CP=16, P=8):
+        super().__init__(K, CP, P)
+        self.model = DNN_Channel_Estimator()
+        self.device = torch.device("cpu")
+        try:
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+            self.model.eval()
+        except:
+            print("找不到模型文件！")
+
+    # 重写接收方法
+    def receive_with_ai(self, rx_serial):
+        symbol_len = self.K + self.CP
+        n_blocks = len(rx_serial) // symbol_len
+        rx_serial = rx_serial[:n_blocks * symbol_len]
+        rx_matrix = rx_serial.reshape(symbol_len, n_blocks, order='F')
+        rx_data_time = rx_matrix[self.CP:, :]
+        rx_freq_data = np.fft.fft(rx_data_time, axis=0)
+
+        # 1. 提取导频
+        rx_pilots = rx_freq_data[self.pilotCarriers, :]
+        H_ls_pilots = rx_pilots / (1.0 + 0j)  # LS 估计 (8, n_blocks)
+
+        # 2. 准备 AI 输入 (Batch 处理)
+        H_ls_transposed = H_ls_pilots.T
+        features = np.hstack([H_ls_transposed.real, H_ls_transposed.imag])
+        input_tensor = torch.FloatTensor(features).to(self.device)
+
+        # 3. AI 推理
+        with torch.no_grad():
+            output_tensor = self.model(input_tensor)  # -> (n_blocks, 128)
+
+        # 4. 还原为复数 H_est
+        output_np = output_tensor.cpu().numpy()
+        H_est_real = output_np[:, :64]
+        H_est_imag = output_np[:, 64:]
+        # 转置回 (64, n_blocks) 以匹配后续计算
+        H_est_matrix = (H_est_real + 1j * H_est_imag).T
+
+        rx_eq_data = rx_freq_data / H_est_matrix
+        qpsk_symbols = rx_eq_data[self.dataCarriers, :]
+        return self._qpsk_demap(qpsk_symbols.flatten(order='F'))
