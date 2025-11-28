@@ -1,6 +1,7 @@
 # 📡 PyOFDM: A Python-based OFDM Communication System
 
 ![System Evolution](ofdm_evolution.gif)
+
 *(Above: Real-time visualization of image recovery as SNR increases from -5dB to 25dB)*
 
 ## 🧠 v2.0 Update: Deep Learning Powered Receiver
