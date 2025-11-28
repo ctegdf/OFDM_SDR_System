@@ -37,7 +37,7 @@ def main_test(image_path, target_snr=25):
 
     # 4. 信道
     print(f"3. 通过信道 (SNR={target_snr}dB)...")
-    rx_signal = run_channel(tx_signal, target_snr)
+    rx_signal, _ = run_channel(tx_signal, target_snr)
 
     # 5. 接收
     print("4. 接收解调...")

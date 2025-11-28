@@ -15,7 +15,7 @@ image_path = "test.png"
 try:
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None: raise Exception("No Image")
-    img = cv2.resize(img, (100, 100))
+    img = cv2.resize(img, (512, 512))
     _, img_bin = cv2.threshold(img, 127, 1, cv2.THRESH_BINARY)
 except:
     print("使用默认十字架图案")
@@ -43,7 +43,7 @@ def update(frame_idx):
     current_snr = snr_values[frame_idx]
 
     # 跑一次仿真
-    rx_signal = run_channel(tx_signal, current_snr)
+    rx_signal, _ = run_channel(tx_signal, current_snr)
     rx_bits = ofdm.receive(rx_signal)
 
     # 还原
@@ -64,4 +64,4 @@ def update(frame_idx):
 print("正在渲染 GIF，请耐心等待...")
 ani = animation.FuncAnimation(fig, update, frames=len(snr_values), interval=100, blit=True)
 ani.save('ofdm_evolution.gif', writer='pillow', fps=10)
-print("✅ 完成！GIF 已保存。")
+print(" 完成！GIF 已保存。")
