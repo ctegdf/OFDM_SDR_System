@@ -1,4 +1,12 @@
-# 📡 PyOFDM: A Python-based OFDM Communication System
+<div align="center">
+
+# 📡 PyOFDM: Python & AI-based OFDM System
+
+[**English**](README.md) | [**中文文档**](README_CN.md)
+
+</div>
+
+---
 
 ![System Evolution](ofdm_evolution.gif)
 
@@ -55,9 +63,9 @@ Below is the direct comparison under 16-QAM modulation.
 2.  **Deep Fading Trap Test:** Created a "Trap Channel" experiment (`run_trap_experiment.py`) to visualize how AI recovers signals when Linear Interpolation fails at deep fading points.
 
 **How to run the trap test:**
-```bash
-python run_trap_experiment.py
-```
+    ```bash
+    python run_trap_experiment.py
+
 
 #### Analysis:
 1.  **Frequency Response (Left Panel):**
@@ -68,3 +76,25 @@ python run_trap_experiment.py
     * **Linear Interpolation (Middle):** Due to the wrong channel estimate, the 16-QAM points are severely twisted and distorted, leading to high bit error rates.
     * **AI Estimator (Right):** The constellation geometry is recovered, with points converging back to their correct grid positions.
 ---
+
+## 🏆 v4.0: End-to-End Learning vs. Hardware Impairments
+
+Can AI survive where Standard QAM fails?
+We simulated a **Power Amplifier (PA) Clipping** scenario (Hardware Non-linearity), which is common in energy-efficient IoT devices.
+
+- **Standard 16-QAM:** Fails catastrophically at high SNR because the corner points are clipped.
+- **AI Autoencoder:** Automatically learns a **"Geometric Shaping"** (constellation contraction) strategy to avoid clipping zones.
+
+![Clipping Result](ser_clipping_comparison.png)
+*(Result: AI achieves significantly lower SER at high SNR by adapting to the non-linear channel constraints.)*
+
+### 🏃 How to run v4.0 Experiment:
+
+1. Navigate to the deep learning module directory:
+   ```bash
+   cd deep_comm
+   
+2. Run the Clipping Benchmark:
+    ```bash
+    python benchmark_clipping.py
+This script automatically trains the Autoencoder model and compares its SER (Symbol Error Rate) against Standard 16-QAM under non-linear clipping channels.
