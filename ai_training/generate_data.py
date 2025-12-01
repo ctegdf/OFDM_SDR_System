@@ -8,7 +8,7 @@ from ofdm_system import OFDM_System
 from channel import run_channel
 
 # --- 配置参数 ---
-NUM_SAMPLES = 10000  # 生成多少组数据 (建议先试 1000，确认没问题再加到 10000+)
+NUM_SAMPLES = 50000  # 生成多少组数据 (建议先试 1000，确认没问题再加到 10000+)
 SNR_RANGE = [5, 20]  # 训练时 SNR 随机范围 (让 AI 见过各种恶劣环境)
 K = 64  # 子载波
 CP = 16

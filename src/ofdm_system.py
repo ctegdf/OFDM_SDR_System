@@ -4,56 +4,7 @@ import torch
 import torch.nn as nn
 import os
 
-class OFDM_System:
-    def __init__(self, K=64, CP=16, P=8):
-        self.K, self.CP, self.P = K, CP, P
-        self.allCarriers = np.arange(K)
-        self.pilotCarriers = self.allCarriers[::K // P]
-        self.dataCarriers = np.delete(self.allCarriers, self.pilotCarriers)
-        self.mu = 2
-        self.mapping_table = {(0, 0): 1 + 1j, (0, 1): -1 + 1j, (1, 0): -1 - 1j, (1, 1): 1 - 1j}
-
-    def _qpsk_map(self, bits):
-        return np.array([self.mapping_table[tuple(b)] for b in bits.reshape(-1, 2)])
-
-    def _qpsk_demap(self, symbols):
-        db = []
-        for s in symbols:
-            if s.real > 0 and s.imag > 0:
-                db.extend([0, 0])
-            elif s.real < 0 and s.imag > 0:
-                db.extend([0, 1])
-            elif s.real < 0 and s.imag < 0:
-                db.extend([1, 0])
-            else:
-                db.extend([1, 1])
-        return np.array(db)
-
-    def transmit(self, bit_stream):
-        bits_per_ofdm = len(self.dataCarriers) * self.mu
-        if len(bit_stream) % bits_per_ofdm != 0: bit_stream = np.append(bit_stream, np.zeros(
-            bits_per_ofdm - len(bit_stream) % bits_per_ofdm, dtype=int))
-        qpsk = self._qpsk_map(bit_stream)
-        nb = len(qpsk) // len(self.dataCarriers)
-        sd = np.zeros((self.K, nb), dtype=complex)
-        sd[self.dataCarriers, :] = qpsk.reshape(-1, nb, order='F')
-        sd[self.pilotCarriers, :] = 1 + 0j
-        tx = np.fft.ifft(sd, axis=0)
-        return np.vstack([tx[-self.CP:, :], tx]).flatten(order='F')
-
-    def receive(self, rx_serial):
-        sl = self.K + self.CP
-        nb = len(rx_serial) // sl
-        rx = rx_serial[:nb * sl].reshape(sl, nb, order='F')[self.CP:, :]
-        rxf = np.fft.fft(rx, axis=0)
-        H = rxf[self.pilotCarriers, :] / (1 + 0j)
-        # 简单插值
-        from scipy.interpolate import interp1d
-        He = np.zeros((self.K, nb), dtype=complex)
-        for i in range(nb):
-            He[:, i] = interp1d(self.pilotCarriers, H[:, i], kind='linear', fill_value="extrapolate")(self.allCarriers)
-        return self._qpsk_demap((rxf / He)[self.dataCarriers, :].flatten(order='F'))
-
+# AI Model Definition (DNN)
 class DNN_Channel_Estimator(nn.Module):
     def __init__(self):
         super(DNN_Channel_Estimator, self).__init__()
@@ -65,47 +16,154 @@ class DNN_Channel_Estimator(nn.Module):
 
     def forward(self, x): return self.layers(x)
 
+# Core System (v3.0 - Supports 16QAM)
+class OFDM_System:
+    def __init__(self, K=64, CP=16, P=8, modulation='QPSK'):
+        self.K = K
+        self.CP = CP
+        self.P = P
+        self.allCarriers = np.arange(K)
+        self.pilotCarriers = self.allCarriers[::K // P]
+        self.dataCarriers = np.delete(self.allCarriers, self.pilotCarriers)
 
+        # --- v3.0: Modulation Config ---
+        self.modulation = modulation
+        if modulation == 'QPSK':
+            self.mu = 2
+            self.norm_factor = np.sqrt(2)
+        elif modulation == '16QAM':
+            self.mu = 4
+            self.norm_factor = np.sqrt(10)
+        else:
+            raise ValueError(f"Unsupported modulation: {modulation}")
+
+        print(f"System Initialized: K={K}, CP={CP}, Mod={modulation}")
+
+    # --- 映射 Logic ---
+    def _map(self, bits):
+        if self.modulation == 'QPSK':
+            # QPSK: 2 bits -> 1 symbol
+            return np.array([1 + 1j if tuple(b) == (0, 0) else
+                             -1 + 1j if tuple(b) == (0, 1) else
+                             -1 - 1j if tuple(b) == (1, 0) else
+                             1 - 1j for b in bits.reshape(-1, 2)]) / self.norm_factor
+        elif self.modulation == '16QAM':
+            # 16QAM: 4 bits -> 1 symbol (Simple Mapping)
+            def bits2amp(b):
+                if tuple(b) == (0, 0): return -3
+                if tuple(b) == (0, 1): return -1
+                if tuple(b) == (1, 0): return 1
+                if tuple(b) == (1, 1): return 3
+
+            symbols = []
+            for b_chunk in bits.reshape(-1, 4):
+                re = bits2amp(b_chunk[0:2])
+                im = bits2amp(b_chunk[2:4])
+                symbols.append(re + 1j * im)
+            return np.array(symbols) / self.norm_factor
+
+    # --- 解映射 Logic (最小距离法) ---
+    def _demap(self, rx_symbols):
+        # 还原幅度
+        rx_scaled = rx_symbols * self.norm_factor
+
+        # 定义标准星座点
+        if self.modulation == 'QPSK':
+            templates = np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j])
+            bit_map = [[0, 0], [0, 1], [1, 0], [1, 1]]
+        elif self.modulation == '16QAM':
+            templates = []
+            bit_map = []
+            levels = [-3, -1, 1, 3]
+            bits_def = [[0, 0], [0, 1], [1, 0], [1, 1]]
+            for i in range(4):
+                for j in range(4):
+                    templates.append(levels[i] + 1j * levels[j])
+                    bit_map.append(bits_def[i] + bits_def[j])
+            templates = np.array(templates)
+
+        # 暴力计算距离寻找最近点
+        out_bits = []
+        for r in rx_scaled:
+            dists = np.abs(r - templates) ** 2
+            idx = np.argmin(dists)
+            out_bits.extend(bit_map[idx])
+
+        return np.array(out_bits)
+
+    def transmit(self, bit_stream):
+        bits_per_ofdm = len(self.dataCarriers) * self.mu
+        extra = len(bit_stream) % bits_per_ofdm
+        if extra != 0: bit_stream = np.append(bit_stream, np.zeros(bits_per_ofdm - extra, dtype=int))
+
+        symbols = self._map(bit_stream)
+        n_blocks = len(symbols) // len(self.dataCarriers)
+
+        sd = np.zeros((self.K, n_blocks), dtype=complex)
+        sd[self.dataCarriers, :] = symbols.reshape(-1, n_blocks, order='F')
+        sd[self.pilotCarriers, :] = 1 + 0j
+
+        tx = np.fft.ifft(sd, axis=0)
+        cp = tx[-self.CP:, :]
+        return np.vstack([cp, tx]).flatten(order='F')
+
+    def receive(self, rx_serial):
+        # 默认只提供传统接收，AI 接收由子类实现
+        sl = self.K + self.CP
+        nb = len(rx_serial) // sl
+        rx = rx_serial[:nb * sl].reshape(sl, nb, order='F')[self.CP:, :]
+        rxf = np.fft.fft(rx, axis=0)
+
+        rx_pilots = rxf[self.pilotCarriers, :]
+        H_ls = rx_pilots / (1 + 0j)
+
+        # 线性插值
+        H_est = np.zeros((self.K, nb), dtype=complex)
+        for i in range(nb):
+            H_est[:, i] = interp1d(self.pilotCarriers, H_ls[:, i], kind='linear', fill_value="extrapolate")(
+                self.allCarriers)
+
+        eq = rxf / H_est
+        data = eq[self.dataCarriers, :].flatten(order='F')
+        return self._demap(data)
+
+
+# ==========================================
+# AI Extension (v2.0)
+# ==========================================
 class AI_OFDM_System(OFDM_System):
-    def __init__(self, model_path, K=64, CP=16, P=8):
-        super().__init__(K, CP, P)
+    def __init__(self, model_path, K=64, CP=16, P=8, modulation='QPSK'):
+        super().__init__(K, CP, P, modulation)
         self.model = DNN_Channel_Estimator()
         self.device = torch.device("cpu")
+
+        # 自动查找路径
+        if not os.path.exists(model_path):
+            alt_path = os.path.join("ai_training", model_path)
+            if os.path.exists(alt_path): model_path = alt_path
+
         try:
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
             self.model.eval()
         except:
-            print("找不到模型文件！")
+            print(" Warning: AI Model not found or load failed.")
 
-    # 重写接收方法
     def receive_with_ai(self, rx_serial):
-        symbol_len = self.K + self.CP
-        n_blocks = len(rx_serial) // symbol_len
-        rx_serial = rx_serial[:n_blocks * symbol_len]
-        rx_matrix = rx_serial.reshape(symbol_len, n_blocks, order='F')
-        rx_data_time = rx_matrix[self.CP:, :]
-        rx_freq_data = np.fft.fft(rx_data_time, axis=0)
+        sl = self.K + self.CP
+        nb = len(rx_serial) // sl
+        rx = rx_serial[:nb * sl].reshape(sl, nb, order='F')[self.CP:, :]
+        rxf = np.fft.fft(rx, axis=0)
 
-        # 1. 提取导频
-        rx_pilots = rx_freq_data[self.pilotCarriers, :]
-        H_ls_pilots = rx_pilots / (1.0 + 0j)  # LS 估计 (8, n_blocks)
+        rx_pilots = rxf[self.pilotCarriers, :]
+        H_ls = rx_pilots / (1 + 0j)
 
-        # 2. 准备 AI 输入 (Batch 处理)
-        H_ls_transposed = H_ls_pilots.T
-        features = np.hstack([H_ls_transposed.real, H_ls_transposed.imag])
-        input_tensor = torch.FloatTensor(features).to(self.device)
-
-        # 3. AI 推理
+        # AI 推理
+        feat = np.hstack([H_ls.T.real, H_ls.T.imag])
+        inp = torch.FloatTensor(feat).to(self.device)
         with torch.no_grad():
-            output_tensor = self.model(input_tensor)  # -> (n_blocks, 128)
+            out = self.model(inp).numpy()
+        H_est = (out[:, :64] + 1j * out[:, 64:]).T
 
-        # 4. 还原为复数 H_est
-        output_np = output_tensor.cpu().numpy()
-        H_est_real = output_np[:, :64]
-        H_est_imag = output_np[:, 64:]
-        # 转置回 (64, n_blocks) 以匹配后续计算
-        H_est_matrix = (H_est_real + 1j * H_est_imag).T
-
-        rx_eq_data = rx_freq_data / H_est_matrix
-        qpsk_symbols = rx_eq_data[self.dataCarriers, :]
-        return self._qpsk_demap(qpsk_symbols.flatten(order='F'))
+        eq = rxf / H_est
+        data = eq[self.dataCarriers, :].flatten(order='F')
+        return self._demap(data)
