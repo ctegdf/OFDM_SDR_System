@@ -63,6 +63,7 @@ AI 模型成功检测到了传统线性插值所遗漏的频域“深衰落”�
 2.  **深衰落陷阱测试**：创建了一个“陷阱信道”实验 (`run_trap_experiment.py`)，以可视化当线性插值在深衰落点失效时，AI 如何恢复信号。
 
 **如何运行陷阱测试：**
+
     ```bash
     python run_trap_experiment.py
 
