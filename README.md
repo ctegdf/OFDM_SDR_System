@@ -50,6 +50,15 @@ Below is the direct comparison under 16-QAM modulation.
 
 ![Deep Fading Trap Demonstration](deep_fading_trap_demo.png)
 
+**New Features:**
+1.  **16-QAM Support:** Upgraded system core to support Higher Order Modulation (16-QAM).
+2.  **Deep Fading Trap Test:** Created a "Trap Channel" experiment (`run_trap_experiment.py`) to visualize how AI recovers signals when Linear Interpolation fails at deep fading points.
+
+**How to run the trap test:**
+```bash
+python run_trap_experiment.py
+```
+
 #### Analysis:
 1.  **Frequency Response (Left Panel):**
     * **Black Line (Ground Truth):** Shows the actual channel with a severe dip.
